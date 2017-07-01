@@ -10,6 +10,8 @@ These templates fall under the following categories:
   * "Full" templates include a complete deployment for a single cloud, including both the Manager and Cloud portions together
   * "Manager" templates include only the Manager and Monitor components, with exports to deploy the Cloud Templates using those exports
   * "Cloud" templates include only the cloud specific components (CCO and AMQP) and require input of the Manager details
+  
+C3-Prereq.json is template to provide to NetworkValidation.py utility to confirm all reachability required for correct C3 configuration.
 
 ## Cloud Specific
 
