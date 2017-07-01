@@ -1,0 +1,26 @@
+{
+    "CloudCenterComponents": {
+        "CCM": {
+            "CCM_IP": "ip-10-0-0-80.ec2.internal",
+            "mode": "NON-HA "
+        },
+        "CloudRegions": [{
+            "components": {
+                "AMQP": {
+                    "AMQP_IP": "ip-10-0-0-85.ec2.internal",
+                    "mode": "NON-HA"
+                },
+                "CCO": {
+                    "CCO_IP": "ip-10-0-0-121.ec2.internal",
+                    "mode": "NON-HA"
+                }
+            },
+            "name": "AWSEast"
+        }],
+        "REPOS": {
+            "BUNDLE_STORE": "http://cdn.cliqr.com",
+            "DOCKER_REGISTRY": "http://repo.cliqrtech.com:5000",
+            "PACKAGE_STORE": "http://repo.cliqrtech.com"
+        }
+    }
+}

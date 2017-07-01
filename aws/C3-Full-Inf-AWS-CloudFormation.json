@@ -1,0 +1,422 @@
+{
+	"AWSTemplateFormatVersion": "2010-09-09",
+	"Description" : "CloudCenter Setup for CloudCenter 4.8 including the required VPC Setup, requires existing KeyPair",
+	"Parameters": {
+		"KeyPair": {
+			"Description": "A SSH Key pair for C3 in AWS",
+			"Type": "AWS::EC2::KeyPair::KeyName"
+		},
+
+		"MgmtIp": {
+			"Description": "Source IP address for SSH Management - For e.g. 192.1.2.3/32",
+			"Type": "String"
+		},
+
+		"InstanceType": {
+			"Description": "The instance type for the C3-CCM, C3-MON, C3-CCO and C3-AMQP",
+			"Type": "String",
+			"AllowedValues": ["t2.small","t2.medium", "t2.large"],
+			"Default": "t2.medium"
+		}
+	},
+	"Mappings": {
+		"RegionMap": {
+			"us-east-1": {"CCO": "ami-e9d8abff", "AMQP": "ami-d38bfbc5", "CCM": "ami-10b6c606", "MON": "ami-7992e26f"},
+			"us-west-2": {"CCO": "ami-81b3d7e1", "AMQP": "ami-4d56322d", "CCM": "ami-4b56322b", "MON": "ami-e1513581"}
+		}
+	},
+	"Resources": {
+		"VPC": {
+			"Description" : "VPC for C3",
+			"Type" : "AWS::EC2::VPC",
+			"Properties" : {
+				"CidrBlock" : "172.16.30.0/23",
+				"EnableDnsHostnames" : "true",
+				"EnableDnsSupport" : "true",
+				"Tags" : [ { "Key" : "Application", "Value" : "CloudCenter" }, { "Key" : "Name", "Value" : { "Ref": "AWS::StackName"}} ]
+			}
+		},
+
+		"Subnet": {
+			"Description" : "Subnet for C3",
+			"Type" : "AWS::EC2::Subnet",
+			"Properties" : {
+				"VpcId": { "Ref": "VPC" },
+				"CidrBlock" : "172.16.30.0/24",
+				"Tags" : [ { "Key" : "Application", "Value" : "CloudCenter" }, { "Key" : "Name", "Value" : { "Ref": "AWS::StackName"}} ]
+			}
+		},
+
+		"InternetGateway": {
+			"Description" : "IGW for C3",
+			"Type": "AWS::EC2::InternetGateway",
+			"Properties" : {
+				"Tags" : [ { "Key" : "Application", "Value" : "CloudCenter" }, { "Key" : "Name", "Value" : { "Ref": "AWS::StackName"}} ]
+			}
+		},
+
+		"AttachGateway" : {
+			"Type": "AWS::EC2::VPCGatewayAttachment",
+			"Properties": {
+				"VpcId": { "Ref": "VPC" },
+				"InternetGatewayId": { "Ref": "InternetGateway" }
+			}
+		},
+
+		"RouteTable": {
+			"Description" : "Route Table for C3 - CCO and AMQP",
+			"Type": "AWS::EC2::RouteTable",
+			"Properties" : {
+				"VpcId" : { "Ref" : "VPC" },
+				"Tags" : [
+					{ "Key" : "Application", "Value" : "CloudCenter" },
+					{ "Key" : "Name", "Value" : { "Ref": "AWS::StackName"} }
+				]
+			}
+		},
+
+		"Route" : {
+			"Type" : "AWS::EC2::Route",
+			"DependsOn" : "AttachGateway",
+			"Properties" : {
+			"RouteTableId" : { "Ref" : "RouteTable" },
+			"DestinationCidrBlock" : "0.0.0.0/0",
+			"GatewayId" : { "Ref" : "InternetGateway" }
+			}
+		},
+
+		"SubnetRouteTableAssociation" : {
+			"Type" : "AWS::EC2::SubnetRouteTableAssociation",
+			"Properties" : {
+				"SubnetId" : { "Ref" : "Subnet" },
+				"RouteTableId" : { "Ref" : "RouteTable" }
+			}
+		},
+
+		"CcmEC2Instance": {
+			"Description": "C3-CCM VM",
+			"Type": "AWS::EC2::Instance",
+			"Properties": {
+				"ImageId": {"Fn::FindInMap": ["RegionMap", {"Ref": "AWS::Region"}, "CCM"]},
+				"InstanceType": { "Ref" : "InstanceType" },
+				"NetworkInterfaces": [{
+					"AssociatePublicIpAddress": "true",
+					"DeviceIndex": "0",
+					"GroupSet": [{"Ref": "C3CcmSecurityGroup"}, {"Ref": "C3SecurityGroup"}],
+					"SubnetId": {"Ref": "Subnet"}
+				}],
+				"Tags" : [ { "Key" : "Application", "Value" : "CloudCenter" },
+					{ "Key" : "Name", "Value" : { "Fn::Join" : [ "-", [ { "Ref": "AWS::StackName"}, "C3 CCM" ] ] }} ],
+				"KeyName": {"Ref": "KeyPair"},
+				"BlockDeviceMappings" : [
+									{
+											"DeviceName" : "/dev/sda1",
+											"Ebs" : {
+											"VolumeType" : "io1",
+											"Iops" : "200",
+											"DeleteOnTermination" : "true",
+											"VolumeSize" : "50"
+										}
+							 },
+								 {
+										"DeviceName" : "/dev/sdk",
+										"NoDevice" : {}
+									 }
+								]
+			}
+		},
+
+		"CcoEC2Instance": {
+			"Description": "C3-CCO VM",
+			"Type": "AWS::EC2::Instance",
+			"Properties": {
+				"ImageId": {"Fn::FindInMap": ["RegionMap", {"Ref": "AWS::Region"}, "CCO"]},
+				"InstanceType": { "Ref" : "InstanceType" },
+				"NetworkInterfaces": [{
+					"AssociatePublicIpAddress": "true",
+					"DeviceIndex": "0",
+					"GroupSet": [{"Ref": "C3CcoSecurityGroup"}, {"Ref": "C3SecurityGroup"}],
+					"SubnetId": {"Ref": "Subnet"}
+				}],
+				"Tags" : [ { "Key" : "Application", "Value" : "CloudCenter" },
+					{ "Key" : "Name", "Value" : { "Fn::Join" : [ "-", [ { "Ref": "AWS::StackName"}, "C3 CCO"] ] }} ],
+				"KeyName": {"Ref": "KeyPair"},
+				"BlockDeviceMappings" : [
+               		{
+                  		"DeviceName" : "/dev/sda1",
+                  		"Ebs" : {
+                     	"VolumeType" : "io1",
+                     	"Iops" : "200",
+                     	"DeleteOnTermination" : "true",
+                     	"VolumeSize" : "50"
+                  	}
+	             },
+    	        	 {
+         	         	"DeviceName" : "/dev/sdk",
+            	     	"NoDevice" : {}
+               	 	 }
+                ]
+			}
+		},
+
+		"AmqpEC2Instance": {
+			"Description": "AMQP VM",
+			"Type": "AWS::EC2::Instance",
+			"Properties": {
+				"ImageId": {"Fn::FindInMap": ["RegionMap", {"Ref": "AWS::Region"}, "AMQP"]},
+				"InstanceType": { "Ref" : "InstanceType" },
+				"NetworkInterfaces": [{
+					"AssociatePublicIpAddress": "true",
+					"DeviceIndex": "0",
+					"GroupSet": [{"Ref": "C3AmqpSecurityGroup"}, {"Ref": "C3SecurityGroup"}],
+					"SubnetId": {"Ref": "Subnet"}
+				}],
+				"Tags" : [
+					{ "Key" : "Application", "Value" : "CloudCenter" },
+					{ "Key" : "Name", "Value" : { "Fn::Join" : [ "-", [ { "Ref": "AWS::StackName"}, "C3 AMQP"] ] }}
+				],
+				"KeyName": {"Ref": "KeyPair"},
+				"BlockDeviceMappings" : [
+               		{
+                  		"DeviceName" : "/dev/sda1",
+                  		"Ebs" : {
+                     	"VolumeType" : "io1",
+                     	"Iops" : "200",
+                     	"DeleteOnTermination" : "true",
+                     	"VolumeSize" : "50"
+                  	}
+	             },
+    	        	 {
+         	         	"DeviceName" : "/dev/sdk",
+            	      	"NoDevice" : {}
+               	 	 }
+                ]
+			}
+		},
+
+		"MonEC2Instance": {
+			"Description": "C3-MON VM",
+			"Type": "AWS::EC2::Instance",
+			"Properties": {
+				"ImageId": {"Fn::FindInMap": ["RegionMap", {"Ref": "AWS::Region"}, "MON"]},
+				"InstanceType": { "Ref" : "InstanceType" },
+				"NetworkInterfaces": [{
+					"AssociatePublicIpAddress": "true",
+					"DeviceIndex": "0",
+					"GroupSet": [{"Ref": "C3MonSecurityGroup"}, {"Ref": "C3SecurityGroup"}],
+					"SubnetId": {"Ref": "Subnet"}
+				}],
+				"Tags" : [
+					{ "Key" : "Application", "Value" : "CloudCenter" },
+					{ "Key" : "Name", "Value" : { "Fn::Join" : [ "-", [ { "Ref": "AWS::StackName"}, "C3 MON" ] ] }}
+					],
+				"KeyName": {"Ref": "KeyPair"},
+				"BlockDeviceMappings" : [
+									{
+											"DeviceName" : "/dev/sda1",
+											"Ebs" : {
+											"VolumeType" : "io1",
+											"Iops" : "200",
+											"DeleteOnTermination" : "true",
+											"VolumeSize" : "50"
+										}
+							 },
+								 {
+										"DeviceName" : "/dev/sdk",
+											"NoDevice" : {}
+									 }
+								]
+			}
+		},
+
+		"CcmElasticIP": {
+			"Type": "AWS::EC2::EIP",
+			"Properties": {
+				"InstanceId": {"Ref": "CcmEC2Instance"},
+				"Domain": "vpc"
+			}
+		},
+
+		"CcoElasticIP": {
+			"Type": "AWS::EC2::EIP",
+			"Properties": {
+				"InstanceId": {"Ref": "CcoEC2Instance"},
+				"Domain": "vpc"
+			}
+		},
+
+		"AmqpElasticIP": {
+			"Type": "AWS::EC2::EIP",
+			"Properties": {
+				"InstanceId": {"Ref": "AmqpEC2Instance"},
+				"Domain": "vpc"
+			}
+		},
+
+		"MonElasticIP": {
+			"Type": "AWS::EC2::EIP",
+			"Properties": {
+				"InstanceId": {"Ref": "MonEC2Instance"},
+				"Domain": "vpc"
+			}
+		},
+
+		"C3CcmSecurityGroup": {
+			"Type": "AWS::EC2::SecurityGroup",
+			"Properties": {
+			  "GroupName" : "CCM Sec Group",
+				"GroupDescription": "Enable Ports for CCM",
+				"VpcId": {"Ref": "VPC"},
+				"SecurityGroupIngress": [
+					{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "CidrIp": { "Ref": "MgmtIp"} },
+					{"IpProtocol": "tcp", "FromPort": 80, "ToPort": 80, "CidrIp": "0.0.0.0/0"},
+				  {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "CidrIp": "0.0.0.0/0"},
+					{"IpProtocol": "tcp", "FromPort": 8443, "ToPort": 8443, "CidrIp": "0.0.0.0/0"}
+				],
+				"Tags" : [
+					{ "Key" : "Application", "Value" : "CloudCenter" },
+					{ "Key" : "Name", "Value" : { "Fn::Join" : [ "-", [ { "Ref": "AWS::StackName"}, "C3 CCM" ] ] } }
+				]
+			}
+		},
+
+		"C3CcoSecurityGroup": {
+			"Type": "AWS::EC2::SecurityGroup",
+			"Properties": {
+				"GroupName" : "CCO Sec Group",
+				"GroupDescription": "Enable Ports for CCO",
+				"VpcId": {"Ref": "VPC"},
+				"SecurityGroupIngress": [
+					{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "CidrIp": { "Ref": "MgmtIp"} },
+					{"IpProtocol": "tcp", "FromPort": 8443, "ToPort": 8443, "SourceSecurityGroupId": { "Ref" : "C3SecurityGroup" }}
+				],
+				"Tags" : [
+					{ "Key" : "Application", "Value" : "CloudCenter" },
+					{ "Key" : "Name", "Value" : { "Fn::Join" : [ "-", [ { "Ref": "AWS::StackName"}, "C3 CCO" ] ] } }
+				]
+			}
+		},
+
+		"C3AmqpSecurityGroup": {
+			"Type": "AWS::EC2::SecurityGroup",
+			"Properties": {
+				"GroupName" : "AMQP Sec Group",
+				"GroupDescription": "Enable Ports for AMQP",
+				"VpcId": {"Ref": "VPC"},
+				"SecurityGroupIngress": [
+					{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "CidrIp": { "Ref": "MgmtIp"} },
+					{"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "CidrIp": "0.0.0.0/0"},
+					{"IpProtocol": "tcp", "FromPort": 8443, "ToPort": 8443, "SourceSecurityGroupId": { "Ref" : "C3CcmSecurityGroup" }},
+					{"IpProtocol": "tcp", "FromPort": 5671, "ToPort": 5671, "SourceSecurityGroupId": { "Ref" : "C3CcoSecurityGroup" }},
+					{"IpProtocol": "tcp", "FromPort": 7788, "ToPort": 7789, "CidrIp": "0.0.0.0/0"}
+				],
+				"Tags" : [
+					{ "Key" : "Application", "Value" : "CloudCenter" },
+					{ "Key" : "Name", "Value" : { "Fn::Join" : [ "-", [ { "Ref": "AWS::StackName"}, "C3 AMQP" ] ] } }
+				]
+			}
+		},
+
+		"C3MonSecurityGroup": {
+			"Type": "AWS::EC2::SecurityGroup",
+			"Properties": {
+				"GroupName" : "MON Sec Group",
+				"GroupDescription": "Enable Ports for MON",
+				"VpcId": {"Ref": "VPC"},
+				"SecurityGroupIngress": [
+					{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "CidrIp": { "Ref": "MgmtIp"} },
+					{"IpProtocol": "tcp", "FromPort": 4560, "ToPort": 4560, "SourceSecurityGroupId": { "Ref" : "C3CcmSecurityGroup" }},
+					{"IpProtocol": "tcp", "FromPort": 4560, "ToPort": 4560, "SourceSecurityGroupId": { "Ref" : "C3CcoSecurityGroup" }},
+					{"IpProtocol": "tcp", "FromPort": 8881, "ToPort": 8881, "SourceSecurityGroupId": { "Ref" : "C3CcmSecurityGroup" }},
+					{"IpProtocol": "tcp", "FromPort": 8881, "ToPort": 8881, "SourceSecurityGroupId": { "Ref" : "C3CcoSecurityGroup" }},
+					{"IpProtocol": "tcp", "FromPort": 8882, "ToPort": 8882, "CidrIp": "0.0.0.0/0"},
+					{"IpProtocol": "tcp", "FromPort": 8443, "ToPort": 8443, "SourceSecurityGroupId": { "Ref" : "C3CcmSecurityGroup" }}
+				],
+				"Tags" : [
+					{ "Key" : "Application", "Value" : "CloudCenter" },
+					{ "Key" : "Name", "Value" : { "Fn::Join" : [ "-", [ { "Ref": "AWS::StackName"}, "C3 MON" ] ] } }
+				]
+			}
+		},
+
+		"C3SecurityGroup": {
+			"Type": "AWS::EC2::SecurityGroup",
+			"Properties": {
+				"GroupName" : "C3 Sec Group",
+				"GroupDescription": "CloudCenter Universal Security Group",
+				"VpcId": {"Ref": "VPC"},
+				"Tags" : [
+					{ "Key" : "Application", "Value" : "CloudCenter" },
+					{ "Key" : "Name", "Value" : { "Fn::Join" : [ "-", [ { "Ref": "AWS::StackName"}, "C3 All" ] ] } }
+				]
+			}
+		},
+
+		"C3SecurityGroupIngress": {
+			"Type": "AWS::EC2::SecurityGroupIngress",
+			"Description": "Editing C3 Security Group to Include ICMP with Self Reference",
+			"Properties": {
+				"GroupId": { "Ref" : "C3SecurityGroup" },
+				"IpProtocol": "icmp",
+				"FromPort": "-1",
+				"ToPort": "-1",
+				"SourceSecurityGroupId": { "Ref" : "C3SecurityGroup" }
+			}
+		}
+	},
+
+	"Outputs": {
+	"CcmPublicIp": {
+		"Description": "Public IP Address of C3-CCM",
+		"Value": {"Ref": "CcmElasticIP"}
+	},
+	"CcmPublicFqdn": {
+		"Description": "Public IP FQDN of C3-CCM",
+		"Value": { "Fn::GetAtt" : [ "CcmEC2Instance", "PublicDnsName" ] }
+	},
+	"CcmPrivateIp": {
+		"Description" : "Private IP Address of C3-CCM",
+		"Value": { "Fn::GetAtt" : ["CcmEC2Instance", "PrivateIp"] }
+	},
+	"CcoPublicIp": {
+			"Description": "Public IP Address of C3-CCO",
+			"Value": {"Ref": "CcoElasticIP"}
+		},
+		"CcoPublicFqdn": {
+			"Description": "Public IP FQDN of C3-CCO",
+			"Value": { "Fn::GetAtt" : [ "CcoEC2Instance", "PublicDnsName" ] }
+		},
+		"CcoPrivateIp": {
+			"Description" : "Private IP Address of C3-CCO",
+			"Value": { "Fn::GetAtt" : ["CcoEC2Instance", "PrivateIp"] }
+		},
+		"AmqpPublicIp": {
+			"Description" : "Public IP Address of AMQP",
+			"Value": { "Ref": "AmqpElasticIP" }
+		},
+		"AmqpPublicFqdn": {
+			"Description": "Public IP FQDN of C3-AMQP",
+			"Value": { "Fn::GetAtt" : [ "AmqpEC2Instance", "PublicDnsName" ] }
+		},
+		"AmqpPrivateIp": {
+			"Description" : "Private IP Address of AMQP",
+			"Value": { "Fn::GetAtt" : ["AmqpEC2Instance", "PrivateIp"] }
+		},
+		"MonPublicIp": {
+			"Description" : "Public IP Address of C3-MON",
+			"Value": { "Ref": "MonElasticIP" }
+		},
+		"MonPublicFqdn": {
+			"Description": "Public IP FQDN of C3-MON",
+			"Value": { "Fn::GetAtt" : [ "MonEC2Instance", "PublicDnsName" ] }
+		},
+		"MonPrivateIp": {
+			"Description" : "Private IP Address of C3-MON",
+			"Value": { "Fn::GetAtt" : ["MonEC2Instance", "PrivateIp"] }
+		},
+		"KeyPairName": {
+			"Description" : "Name of the KeyPair used with CCO and AMQP",
+			"Value": { "Ref": "KeyPair" }
+		}
+	}
+}
